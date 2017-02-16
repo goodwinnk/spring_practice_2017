@@ -39,7 +39,7 @@ class NodeBuilder(
 }
 
 fun PACKAGE(name: String, f: NodeBuilder.() -> Unit) = builder(NodeType.PACKAGE, name, f)
-fun FILE(name: String, f: NodeBuilder.() -> Unit) = builder(NodeType.CLASS, name, f)
+fun FILE(name: String, f: NodeBuilder.() -> Unit) = builder(NodeType.FILE, name, f)
 fun NodeBuilder.PACKAGE(name: String, f: NodeBuilder.() -> Unit) = node(NodeType.PACKAGE, name, f)
 fun NodeBuilder.FILE(name: String, f: NodeBuilder.() -> Unit) = node(NodeType.FILE, name, f)
 fun NodeBuilder.CLASS(name: String, f: NodeBuilder.() -> Unit) = node(NodeType.CLASS, name, f)
