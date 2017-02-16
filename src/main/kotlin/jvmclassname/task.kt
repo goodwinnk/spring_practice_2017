@@ -69,7 +69,7 @@ import jvmclassname.NodeType.*
  *       }
  *     }
  *
- *     FUNTION(top_level) { // org/example/test_kt
+ *     FUNCTION(top_level) { // org/example/test_kt
  *       LAMBDA() // org/example/test_kt$1
  *     }
  *   }
