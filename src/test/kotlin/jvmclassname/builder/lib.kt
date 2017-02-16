@@ -7,9 +7,11 @@ class NodeBuilder(
         val name: String?) {
 
     private val childrenBuilders: MutableList<NodeBuilder> = java.util.ArrayList<NodeBuilder>()
-    private var key: String? = null
 
-    val mapping: MutableMap<String, Node> = java.util.HashMap<String, Node>()
+    private var key: String? = null
+    private var data: String? = null
+
+    val mapping: MutableMap<String, Pair<Node, String?>> = java.util.HashMap<String, Pair<Node, String?>>()
 
     fun node(type: NodeType, name: String?, f: NodeBuilder.() -> Unit) {
         val builder = NodeBuilder(type, name)
@@ -22,7 +24,7 @@ class NodeBuilder(
         resultNode.children = childrenBuilders.map { it.build(resultNode) }
 
         if (key != null) {
-            mapping[key!!] = resultNode
+            mapping[key!!] = resultNode to data
         }
 
         childrenBuilders.forEach { it.mapping.forEach { mapping[it.key] = it.value } }
@@ -30,8 +32,9 @@ class NodeBuilder(
         return resultNode
     }
 
-    fun store(key: String) {
+    fun store(key: String, data: String? = null) {
         this.key = key
+        this.data = data
     }
 }
 
