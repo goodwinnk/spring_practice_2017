@@ -1,6 +1,7 @@
 package jvmclassname
 
 import jvmclassname.NodeType.*
+import java.util.*
 
 /**
  * Класс jvmclassname.Node задает узел синтаксического дерева для некоторого языка, который
@@ -80,7 +81,72 @@ import jvmclassname.NodeType.*
  */
 
 fun jvmClassName(node: Node): String {
-    TODO("Implement this method")
+    val parents = node.parents.toMutableList()
+    parents.reverse()
+    check(parents.first().type == FILE)
+
+    val topLevelObject = parents.find { it.type == CLASS || it.type == FUNCTION } ?: node
+    if (topLevelObject.type == CLASS) {
+        parents.removeAt(0)
+    } else if (parents[1].type == PACKAGE) {
+        val tmp = parents[0]
+        parents[0] = parents[1]
+        parents[1] = tmp
+    }
+
+    fun translateNodesToClassName(nodes: MutableList<Node>, self: Node): String {
+        if (nodes.removeAll { it.type == FUNCTION || it.type == LAMBDA } ||
+                self.type != FUNCTION) {
+            nodes.add(self)
+        }
+
+        fun getAnonymousClassesNumberTable(node: Node): Map<Node, Int> {
+            val anonymousClassesMap = HashMap<Node, Int>()
+            val packageOrFile = node.parents.find { it.type == PACKAGE } ?: node.parents.find { it.type == FILE }
+
+            fun <T> enumerate(seq: Sequence<T>): Sequence<Pair<T, Int>> {
+                return seq.zip((1..seq.count()).asSequence())
+            }
+
+            val topLevelFunctionsDescendants = ArrayList<Node>()
+            for (child in checkNotNull(packageOrFile).children) {
+                if (child.type == FUNCTION) {
+                    topLevelFunctionsDescendants.addAll(child.descendants)
+                } else {
+                    val classFunctions = child.descendants.filter {
+                        it.type == FUNCTION && it.parent!!.type != CLASS || it.type == LAMBDA
+                    }
+                    anonymousClassesMap.putAll(enumerate(classFunctions.asSequence()))
+                }
+            }
+
+            topLevelFunctionsDescendants.removeAll { it.type != FUNCTION && it.type != LAMBDA }
+            anonymousClassesMap.putAll(enumerate(topLevelFunctionsDescendants.asSequence()))
+
+            return anonymousClassesMap
+        }
+
+        val anonymousClassesNumberTable = getAnonymousClassesNumberTable(self)
+
+        val pathStringBuilder = nodes.map {
+            when (it.type) {
+                FILE -> "${it.modifiedName}"
+                PACKAGE -> "${it.modifiedName}/"
+                CLASS -> {
+                    if (checkNotNull(it.parent).type == CLASS) {
+                        "$${it.name}"
+                    } else {
+                        "${it.name}"
+                    }
+                }
+                else -> "$${anonymousClassesNumberTable[it]}"
+            }
+        }
+
+        return pathStringBuilder.joinToString("")
+    }
+
+    return translateNodesToClassName(parents, node)
 }
 
 enum class NodeType {
@@ -104,11 +170,29 @@ class Node(
 val Node.packageName: String?
     get() = parents.firstOrNull { it.type == PACKAGE }?.name
 
+val Node.modifiedName: String?
+    get() = when(type) {
+        PACKAGE -> name?.replace('.', '/')
+        FILE -> name?.replace(Regex("[.$]"), "_")
+        else -> name
+    }
+
 val Node.parentsWithSelf: Sequence<Node>
     get() = generateSequence(this) { if (it.type == FILE) null else it.parent }
 
 val Node.parents: Sequence<Node>
     get() = parentsWithSelf.drop(1)
 
+val Node.descendants: Sequence<Node>
+    get() {
+        val tour = ArrayList<Node>()
+        fun dfs(current: Node) {
+            for (child in current.children) {
+                tour.add(child)
+                dfs(child)
+            }
+        }
 
-
+        dfs(this)
+        return tour.asSequence()
+    }
