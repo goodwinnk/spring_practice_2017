@@ -1,5 +1,6 @@
 package jvmclassname
 
+import com.sun.org.apache.xpath.internal.operations.Bool
 import jvmclassname.NodeType.*
 
 /**
@@ -80,7 +81,18 @@ import jvmclassname.NodeType.*
  */
 
 fun jvmClassName(node: Node): String {
-    TODO("Implement this method")
+    return when  {
+        node.isTopLevelClass    -> node.modifiedPackageName + node.name
+        node.isTopLevelFunction -> node.modifiedPackageName + node.modifiedFileName
+        node.isClass            -> jvmClassName(node.parent!!) + "$" + node.name!!
+        node.isLocalFunction || node.isLambda -> {
+            val root = node.firstParentNonlocalFuncOrClass!!
+            jvmClassName(root) + "$" + node.num.toString()
+        }
+        // member:
+        node.isFunction -> jvmClassName(node.parent!!)
+        else -> throw IllegalArgumentException("JVM class for this type of node should not be created.")
+    }
 }
 
 enum class NodeType {
@@ -104,11 +116,77 @@ class Node(
 val Node.packageName: String?
     get() = parents.firstOrNull { it.type == PACKAGE }?.name
 
+val Node.fileName: String
+    get() = file.name!!
+
+val Node.file: Node
+    get() = parentsWithSelf.first { it.type == FILE }
+
+val Node.modifiedPackageName: String
+    get () = if (packageName != null) Regex("\\.").replace(packageName!!, "/") + "/" else ""
+
+val Node.modifiedFileName: String
+    get () = Regex("\\.|\\$").replace(fileName, "_")
+
 val Node.parentsWithSelf: Sequence<Node>
     get() = generateSequence(this) { if (it.type == FILE) null else it.parent }
 
 val Node.parents: Sequence<Node>
     get() = parentsWithSelf.drop(1)
+
+val Node.isClass: Boolean
+    get() = type == CLASS
+
+val Node.isFile: Boolean
+    get() = type == FILE
+
+val Node.isPackage: Boolean
+    get() = type == PACKAGE
+
+val Node.isLambda: Boolean
+    get() = type == LAMBDA
+
+val Node.isFunction: Boolean
+    get() = type == FUNCTION
+
+val Node.isTopLevelClass: Boolean
+    get() = isClass && (parent!!.isFile || parent.isPackage)
+
+val Node.isTopLevelFunction: Boolean
+    get() = isFunction && (parent!!.isFile || parent.isPackage)
+
+val Node.isLocalFunction: Boolean
+    get() = isFunction && !(parent!!.isClass || parent.isFile || parent.isPackage)
+
+val Node.firstParentNonlocalFuncOrClass: Node?
+    get() = parentsWithSelf.firstOrNull { it.isClass || (it.isFunction && !it.isLocalFunction) }
+
+val Node.topLevelParent: Node?
+    get() = parentsWithSelf.firstOrNull { it.isTopLevelFunction || it.isTopLevelClass }
+
+val Node.num: Int
+    get() {
+        val root = topLevelParent!!
+        return if (root.isClass) enumerate(root, this) else enumerate(root.file, this, Node::isClass)
+    }
+
+fun enumerate(root: Node, target: Node, toSkip: (Node) -> Boolean = { false }): Int {
+    val (res, isValid) = dfs(root, target, 1,toSkip)
+    assert(isValid)
+    return res
+}
+
+fun dfs(current: Node, target: Node, currNum: Int, toSkip: (Node) -> Boolean): Pair<Int, Boolean> {
+    if (current == target) return Pair(currNum, true)
+    val currentCounts = current.isLambda || current.isLocalFunction
+    var res = Pair(if (currentCounts) currNum + 1 else currNum, false)
+    for (child in current.children) {
+        if (toSkip(child)) continue
+        res = dfs(child, target, res.first, toSkip)
+        if (res.second) return res
+    }
+    return res
+}
 
 
 
