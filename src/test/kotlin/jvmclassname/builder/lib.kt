@@ -43,7 +43,7 @@ fun FILE(name: String, f: NodeBuilder.() -> Unit) = builder(NodeType.FILE, name,
 fun NodeBuilder.PACKAGE(name: String, f: NodeBuilder.() -> Unit) = node(NodeType.PACKAGE, name, f)
 fun NodeBuilder.FILE(name: String, f: NodeBuilder.() -> Unit) = node(NodeType.FILE, name, f)
 fun NodeBuilder.CLASS(name: String, f: NodeBuilder.() -> Unit) = node(NodeType.CLASS, name, f)
-fun NodeBuilder.LAMBDA(name: String, f: NodeBuilder.() -> Unit) = node(NodeType.LAMBDA, name, f)
+fun NodeBuilder.LAMBDA(f: NodeBuilder.() -> Unit) = node(NodeType.LAMBDA, null, f)
 fun NodeBuilder.FUNCTION(name: String, f: NodeBuilder.() -> Unit) = node(NodeType.FUNCTION, name, f)
 
 fun builder(type: NodeType, name: String?, f: NodeBuilder.() -> Unit): NodeBuilder {
