@@ -80,8 +80,97 @@ import jvmclassname.NodeType.*
  */
 
 fun jvmClassName(node: Node): String {
-    TODO("Implement this method")
+    val builder = JvmClassNameBuilder()
+    builder.build(node)
+    return builder.getResult()
 }
+
+private class JvmClassNameBuilder {
+
+    private val result = StringBuilder()
+
+    fun getResult() = result.toString()
+
+    fun build(node: Node) {
+        if (node.type == FILE || node.type == PACKAGE) {
+            throw IllegalArgumentException("Parameter type `${node.type}` is not allowed")
+        }
+
+        if (node.parent == null) {
+            throw IllegalStateException("`${node.type}` without parent: `${node.name}`")
+        }
+
+        if (node.type == CLASS) {
+            when (node.parent.type) {
+                // Nested class
+                CLASS -> {
+                    build(node.parent)
+                    result.append('$')
+                }
+                // Top level class
+                PACKAGE -> result.append(node.packageModifiedName)
+                FILE -> {}
+                // Something wrong
+                else -> throw IllegalStateException("`${node.parent.type}` can't be a parent of `$CLASS`")
+            }
+            result.append(node.name)
+        }
+
+        if (node.type == FUNCTION || node.type == LAMBDA) {
+            when (node.parent.type) {
+                // Top level function
+                PACKAGE -> {
+                    result.append(node.packageModifiedName)
+                    result.append(node.fileModifiedName)
+                }
+                FILE -> result.append(node.fileModifiedName)
+                // Nested function
+                FUNCTION, LAMBDA -> buildAnonymous(node)
+                // Common function
+                CLASS -> build(node.parent)
+            }
+        }
+    }
+
+    private fun buildAnonymous(node: Node) {
+        var lastFunction = node
+        val root = run {
+            var current = node
+            while (current.type != CLASS && current.type != FILE) {
+                if (current.type == FUNCTION) {
+                    lastFunction = current
+                }
+                current = current.parent
+                        ?: throw IllegalStateException("`${node.type}` without parent: `${node.name}`")
+            }
+            current
+        }
+
+        build(if (root.type == CLASS) root else lastFunction)
+
+        var count = 0
+        fun dfs(current: Node, insideFunction: Boolean): Boolean {
+            if (current === node) {
+                return true
+            }
+            for (next in current.children) {
+                if (next.type == FUNCTION || next.type == LAMBDA) {
+                    if (insideFunction) count += 1
+                    if (dfs(next, true)) return true
+                }
+                if (next.type == PACKAGE || (root.type == CLASS && next.type == CLASS)) {
+                    if (dfs(next, false)) return true
+                }
+            }
+            return false
+        }
+
+        dfs(root, false)
+        result.append('$')
+        result.append(count)
+    }
+}
+
 
 enum class NodeType {
     FILE,
@@ -110,5 +199,15 @@ val Node.parentsWithSelf: Sequence<Node>
 val Node.parents: Sequence<Node>
     get() = parentsWithSelf.drop(1)
 
+val Node.packageModifiedName: String?
+    get() = packageName?.replace('.', '/') + '/'
 
+val Node.file: Node
+    get() = when {
+        (type == FILE) -> this
+        parent == null -> throw IllegalStateException("Node without file $name")
+        else -> parent.file
+    }
 
+val Node.fileModifiedName: String
+    get() = file.name?.replace(Regex("[.${'$'}]"), "_") ?: throw IllegalStateException("File without name")
