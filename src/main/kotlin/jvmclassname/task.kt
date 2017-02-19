@@ -79,21 +79,9 @@ import jvmclassname.NodeType.*
  *   По данному узлу типа CLASS, FUNCTION или LAMBDA построить имя JVM-класса в функции jvmclassname.jvmClassName().
  */
 
-/*
-* Каждый узел типа CLASS, FUNCTION, LAMBDA при компиляции попадает в какой-то JVM-класс.
- * Имя JVM-класса генерируется по следующим правилам:
-  *   + Для локальных функций и LAMBDA-узлов:
- *       <имя JVM-класса для ближайшего предка, соответствующего нелокальной функции или классу><'$'><номер анонимного класса>
- *       Номер анонимного класса равен номеру данного узла при обходе синтаксического дерева в глубину. Нумерация начинается с 1.
- *       (https://ru.wikipedia.org/wiki/%D0%9F%D0%BE%D0%B8%D1%81%D0%BA_%D0%B2_%D0%B3%D0%BB%D1%83%D0%B1%D0%B8%D0%BD%D1%83).
- *       При этом для узлов, являющихся потомками функции верхнего уровня, поиск запускается
- *       с ближайшего предка типа FILE, и должен пропускать классы верхнего уровня в данном файле.
- *       Для потомков классов верхнего уровня, поиск запускается на этом классе.
-  */
-
 fun jvmClassName(node: Node): String {
     val builder = JvmClassNameBuilder()
-    builder.buildImpl(node)
+    builder.build(node)
     return builder.getResult()
 }
 
@@ -103,56 +91,43 @@ private class JvmClassNameBuilder {
 
     fun getResult() = result.toString()
 
-    fun buildImpl(node: Node) {
+    fun build(node: Node) {
+        if (node.type == FILE || node.type == PACKAGE) {
+            throw IllegalArgumentException("Parameter type `${node.type}` is not allowed")
+        }
 
         if (node.parent == null) {
             throw IllegalStateException("`${node.type}` without parent: `${node.name}`")
         }
 
-        when (node.type) {
-
-            CLASS -> {
-                when (node.parent.type) {
-                    // Nested class
-                    CLASS -> {
-                        buildImpl(node.parent)
-                        result.append('$')
-                    }
-
-                    // Top level class
-                    PACKAGE -> result.append(node.packageModifiedName)
-                    FILE -> {}
-
-                    else -> {
-                        throw IllegalStateException("`${node.parent.type}` can't be a parent of `$CLASS`")
-                    }
+        if (node.type == CLASS) {
+            when (node.parent.type) {
+                // Nested class
+                CLASS -> {
+                    build(node.parent)
+                    result.append('$')
                 }
-                result.append(node.name)
+                // Top level class
+                PACKAGE -> result.append(node.packageModifiedName)
+                FILE -> {}
+                // Something wrong
+                else -> throw IllegalStateException("`${node.parent.type}` can't be a parent of `$CLASS`")
             }
+            result.append(node.name)
+        }
 
-            FUNCTION, LAMBDA -> {
-                when (node.parent.type) {
-                    // Top level function
-                    PACKAGE -> {
-                        result.append(node.packageModifiedName)
-                        result.append(node.fileModifiedName)
-                    }
-                    FILE -> {
-                        result.append(node.fileModifiedName)
-                    }
-                    // Nested function
-                    FUNCTION, LAMBDA -> {
-                        buildAnonymous(node)
-                    }
-                    // Common function
-                    CLASS -> {
-                        buildImpl(node.parent)
-                    }
+        if (node.type == FUNCTION || node.type == LAMBDA) {
+            when (node.parent.type) {
+                // Top level function
+                PACKAGE -> {
+                    result.append(node.packageModifiedName)
+                    result.append(node.fileModifiedName)
                 }
-            }
-
-            else -> {
-                throw IllegalArgumentException("Parameter type `${node.type}` is not allowed")
+                FILE -> result.append(node.fileModifiedName)
+                // Nested function
+                FUNCTION, LAMBDA -> buildAnonymous(node)
+                // Common function
+                CLASS -> build(node.parent)
             }
         }
     }
@@ -171,7 +146,7 @@ private class JvmClassNameBuilder {
             current
         }
 
-        buildImpl(if (root.type == CLASS) root else lastFunction)
+        build(if (root.type == CLASS) root else lastFunction)
 
         var count = 0
         fun dfs(current: Node, insideFunction: Boolean): Boolean {
