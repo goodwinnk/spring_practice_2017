@@ -102,29 +102,26 @@ fun jvmClassName(node: Node): String {
         if (!self.isTopLevelFunction && !self.isNonLocalFunction)
             nodes.add(self)
 
-        fun getAnonymousClassesNumberTable(node: Node): Map<Node, Int> {
+        fun getAnonymousClassNumberByFunctionOrLambda(node: Node): Int {
+            checkNotNull(node.type == FUNCTION || node.type == LAMBDA)
+
             val topLevelParent = node.topLevelParentOrSelf
             checkNotNull(topLevelParent)
-
-            fun <T> enumerate(list: List<T>): List<Pair<T, Int>> {
-                return list.zip((1..list.count()))
-            }
 
             if (topLevelParent!!.type == CLASS) {
                 val anonymousClassesForTopLevelParent = topLevelParent.descendants
                         .filter { it.type == FUNCTION && it.parent!!.type != CLASS || it.type == LAMBDA }
-                return enumerate(anonymousClassesForTopLevelParent).toMap()
+                return anonymousClassesForTopLevelParent.indexOf(node) + 1
             } else {
                 val anonymousClassesForTopLevelFunctions = topLevelParent.parent!!.children
                         .filter { it.type == FUNCTION }
                         .map(Node::descendants)
                         .map { it.filter { it.type == FUNCTION || it.type == LAMBDA } }
                         .flatten()
-                return enumerate(anonymousClassesForTopLevelFunctions).toMap()
+                return anonymousClassesForTopLevelFunctions.indexOf(node) + 1
             }
         }
 
-        val anonymousClassesNumberTable = getAnonymousClassesNumberTable(self)
         val pathStringBuilder = nodes.map {
             when (it.type) {
                 FILE -> "${it.modifiedName}"
@@ -136,7 +133,7 @@ fun jvmClassName(node: Node): String {
                         "${it.name}"
                     }
                 }
-                else -> "$${anonymousClassesNumberTable[it]}"
+                else -> "$${getAnonymousClassNumberByFunctionOrLambda(it)}"
             }
         }
 
