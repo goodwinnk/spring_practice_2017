@@ -83,51 +83,48 @@ import java.util.*
 fun jvmClassName(node: Node): String {
     val parents = node.parents.toMutableList()
     parents.reverse()
-    check(parents.first().type == FILE)
 
-    val topLevelObject = parents.find { it.type == CLASS || it.type == FUNCTION } ?: node
-    if (topLevelObject.type == CLASS) {
+    val topLevelObject = node.topLevelParentOrSelf
+    if (topLevelObject!!.type == CLASS) {
+        // <file><package>... -> <package>
+        check(parents[0].type == FILE)
         parents.removeAt(0)
-    } else if (parents[1].type == PACKAGE) {
-        val tmp = parents[0]
-        parents[0] = parents[1]
-        parents[1] = tmp
+    } else if (topLevelObject.type == FUNCTION &&
+               parents.any { it.type == PACKAGE }) {
+        // <file><package>... -> <package><file>...
+        check(parents[0].type == FILE)
+        check(parents[1].type == PACKAGE)
+        parents.swap(0, 1)
     }
 
     fun translateNodesToClassName(nodes: MutableList<Node>, self: Node): String {
-        if (nodes.removeAll { it.type == FUNCTION || it.type == LAMBDA } ||
-                self.type != FUNCTION) {
+        nodes.removeAll { it.type == FUNCTION || it.type == LAMBDA }
+        if (!self.isTopLevelFunction && !self.isNonLocalFunction)
             nodes.add(self)
-        }
 
         fun getAnonymousClassesNumberTable(node: Node): Map<Node, Int> {
-            val anonymousClassesMap = HashMap<Node, Int>()
-            val packageOrFile = node.parents.find { it.type == PACKAGE } ?: node.parents.find { it.type == FILE }
+            val topLevelParent = node.topLevelParentOrSelf
+            checkNotNull(topLevelParent)
 
-            fun <T> enumerate(seq: Sequence<T>): Sequence<Pair<T, Int>> {
-                return seq.zip((1..seq.count()).asSequence())
+            fun <T> enumerate(list: List<T>): List<Pair<T, Int>> {
+                return list.zip((1..list.count()))
             }
 
-            val topLevelFunctionsDescendants = ArrayList<Node>()
-            for (child in checkNotNull(packageOrFile).children) {
-                if (child.type == FUNCTION) {
-                    topLevelFunctionsDescendants.addAll(child.descendants)
-                } else {
-                    val classFunctions = child.descendants.filter {
-                        it.type == FUNCTION && it.parent!!.type != CLASS || it.type == LAMBDA
-                    }
-                    anonymousClassesMap.putAll(enumerate(classFunctions.asSequence()))
-                }
+            if (topLevelParent!!.type == CLASS) {
+                val anonymousClassesForTopLevelParent = topLevelParent.descendants
+                        .filter { it.type == FUNCTION && it.parent!!.type != CLASS || it.type == LAMBDA }
+                return enumerate(anonymousClassesForTopLevelParent).toMap()
+            } else {
+                val anonymousClassesForTopLevelFunctions = topLevelParent.parent!!.children
+                        .filter { it.type == FUNCTION }
+                        .map(Node::descendants)
+                        .map { it.filter { it.type == FUNCTION || it.type == LAMBDA } }
+                        .flatten()
+                return enumerate(anonymousClassesForTopLevelFunctions).toMap()
             }
-
-            topLevelFunctionsDescendants.removeAll { it.type != FUNCTION && it.type != LAMBDA }
-            anonymousClassesMap.putAll(enumerate(topLevelFunctionsDescendants.asSequence()))
-
-            return anonymousClassesMap
         }
 
         val anonymousClassesNumberTable = getAnonymousClassesNumberTable(self)
-
         val pathStringBuilder = nodes.map {
             when (it.type) {
                 FILE -> "${it.modifiedName}"
@@ -183,7 +180,19 @@ val Node.parentsWithSelf: Sequence<Node>
 val Node.parents: Sequence<Node>
     get() = parentsWithSelf.drop(1)
 
-val Node.descendants: Sequence<Node>
+val Node.isNonLocalFunction: Boolean
+    get() = type == FUNCTION && parent!!.type == CLASS
+
+val Node.isTopLevelFunction: Boolean
+    get() = type == FUNCTION && (parent!!.type == FILE || parent.type == PACKAGE)
+
+val Node.isTopLevelClass: Boolean
+    get() = type == CLASS && (parent!!.type == FILE || parent.type == PACKAGE)
+
+val Node.topLevelParentOrSelf: Node?
+    get() = parentsWithSelf.firstOrNull { it.isTopLevelFunction || it.isTopLevelClass }
+
+val Node.descendants: List<Node>
     get() {
         val tour = ArrayList<Node>()
         fun dfs(current: Node) {
@@ -194,5 +203,11 @@ val Node.descendants: Sequence<Node>
         }
 
         dfs(this)
-        return tour.asSequence()
+        return tour
     }
+
+fun <T> MutableList<T>.swap(index1: Int, index2: Int) {
+    val tmp = this[index1]
+    this[index1] = this[index2]
+    this[index2] = tmp
+}
