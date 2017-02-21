@@ -79,8 +79,15 @@ import jvmclassname.NodeType.*
  *   По данному узлу типа CLASS, FUNCTION или LAMBDA построить имя JVM-класса в функции jvmclassname.jvmClassName().
  */
 
-fun jvmClassName(node: Node): String {
-    TODO("Implement this method")
+fun jvmClassName(node: Node): String? {
+    return when {
+        node.isTopLevelClass                  -> (node.modifiedPackageName ?: "") + node.name
+        node.isTopLevelFunction               -> (node.modifiedPackageName ?: "") + node.modifiedFileName
+        node.isNonTopLevelClass               -> jvmClassName(node.parent!!) + '$' + node.name
+        node.isLambda || node.isLocalFunction -> jvmClassName(node.nonLocalFunctionOrClassParent) + '$' + node.num
+        node.isFunction                       -> jvmClassName(node.parent!!)
+        else                                  -> throw IllegalArgumentException("jvmClassName for $node not recognized")
+    }
 }
 
 enum class NodeType {
@@ -96,19 +103,83 @@ class Node(
         val name: String?,
         val parent: Node?,
         var children: List<Node> = emptyList()
-) {
+          ) {
     override fun toString() = "$type $name"
 }
 
-// == Sample utils ==
+val Node.isPackage: Boolean
+    get() = type == PACKAGE
+
+val Node.isFile: Boolean
+    get() = type == FILE
+
+val Node.isClass: Boolean
+    get() = type == CLASS
+
+val Node.isFunction: Boolean
+    get() = type == FUNCTION
+
+val Node.isLocalFunction: Boolean
+    get() = isFunction && parents.any(Node::isFunction)
+
+val Node.isLambda: Boolean
+    get() = type == LAMBDA
+
+val Node.num: Int
+    get() : Int {
+        val head = parents.find { it.isTopLevelClass || it.isFile }!!
+        var num = 0
+
+        fun dfs(current: Node, isSkipped: (Node) -> Boolean = { false }): Int {
+            if (current == this) return num
+
+            for (child in current.children) {
+                if (!isSkipped(child)) {
+                    if (child.isLambda || child.isLocalFunction) num++
+
+                    val res = dfs(child, isSkipped)
+
+                    if (res > 0) return res
+                }
+            }
+
+            return -1
+        }
+
+        return if (head.isFile) dfs(head, Node::isTopLevelClass) else dfs(head)
+    }
+
+val Node.isTopLevelElement: Boolean
+    get() = parent?.run { isFile || isPackage } ?: false
+
+val Node.isTopLevelClass: Boolean
+    get() = isClass && isTopLevelElement
+
+val Node.isTopLevelFunction: Boolean
+    get() = isFunction && isTopLevelElement
+
+val Node.isNonTopLevelClass: Boolean
+    get() = (type == CLASS) && !isTopLevelElement
+
+val Node.modifiedPackageName: String?
+    get() = packageName?.run { replace('.', '/') + '/' }
+
+val Node.modifiedFileName: String
+    get() = fileName.run { replace(Regex("([.$])"), "_") }
+
+val Node.nonLocalFunctionOrClassParent: Node
+    get() = parents.find { (it.isFunction && !it.isLocalFunction) || it.isClass }!!
+
+val Node.fileName: String
+    get() = parents.first(Node::isFile).name!!
+
 val Node.packageName: String?
-    get() = parents.firstOrNull { it.type == PACKAGE }?.name
+    get() = parents.firstOrNull(Node::isPackage)?.name
 
 val Node.parentsWithSelf: Sequence<Node>
     get() = generateSequence(this) { if (it.type == FILE) null else it.parent }
 
 val Node.parents: Sequence<Node>
     get() = parentsWithSelf.drop(1)
-
 
 
