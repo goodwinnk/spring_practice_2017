@@ -1,6 +1,7 @@
 package jvmclassname
 
 import jvmclassname.NodeType.*
+import java.util.*
 
 /**
  * Класс jvmclassname.Node задает узел синтаксического дерева для некоторого языка, который
@@ -80,7 +81,66 @@ import jvmclassname.NodeType.*
  */
 
 fun jvmClassName(node: Node): String {
-    TODO("Implement this method")
+    val parents = node.parents.toMutableList()
+    parents.reverse()
+
+    val topLevelObject = node.topLevelParentOrSelf
+    if (topLevelObject!!.type == CLASS) {
+        // <file><package>... -> <package>
+        check(parents[0].type == FILE)
+        parents.removeAt(0)
+    } else if (topLevelObject.type == FUNCTION &&
+               parents.any { it.type == PACKAGE }) {
+        // <file><package>... -> <package><file>...
+        check(parents[0].type == FILE)
+        check(parents[1].type == PACKAGE)
+        parents.swap(0, 1)
+    }
+
+    fun translateNodesToClassName(nodes: MutableList<Node>, self: Node): String {
+        nodes.removeAll { it.type == FUNCTION || it.type == LAMBDA }
+        if (!self.isTopLevelFunction && !self.isNonLocalFunction)
+            nodes.add(self)
+
+        fun getAnonymousClassNumberByFunctionOrLambda(node: Node): Int {
+            checkNotNull(node.type == FUNCTION || node.type == LAMBDA)
+
+            val topLevelParent = node.topLevelParentOrSelf
+            checkNotNull(topLevelParent)
+
+            if (topLevelParent!!.type == CLASS) {
+                val anonymousClassesForTopLevelParent = topLevelParent.descendants
+                        .filter { it.type == FUNCTION && it.parent!!.type != CLASS || it.type == LAMBDA }
+                return anonymousClassesForTopLevelParent.indexOf(node) + 1
+            } else {
+                val anonymousClassesForTopLevelFunctions = topLevelParent.parent!!.children
+                        .filter { it.type == FUNCTION }
+                        .map(Node::descendants)
+                        .map { it.filter { it.type == FUNCTION || it.type == LAMBDA } }
+                        .flatten()
+                return anonymousClassesForTopLevelFunctions.indexOf(node) + 1
+            }
+        }
+
+        val pathStringBuilder = nodes.map {
+            when (it.type) {
+                FILE -> "${it.modifiedName}"
+                PACKAGE -> "${it.modifiedName}/"
+                CLASS -> {
+                    if (checkNotNull(it.parent).type == CLASS) {
+                        "$${it.name}"
+                    } else {
+                        "${it.name}"
+                    }
+                }
+                else -> "$${getAnonymousClassNumberByFunctionOrLambda(it)}"
+            }
+        }
+
+        return pathStringBuilder.joinToString("")
+    }
+
+    return translateNodesToClassName(parents, node)
 }
 
 enum class NodeType {
@@ -104,11 +164,47 @@ class Node(
 val Node.packageName: String?
     get() = parents.firstOrNull { it.type == PACKAGE }?.name
 
+val Node.modifiedName: String?
+    get() = when(type) {
+        PACKAGE -> name?.replace('.', '/')
+        FILE -> name?.replace(Regex("[.$]"), "_")
+        else -> name
+    }
+
 val Node.parentsWithSelf: Sequence<Node>
     get() = generateSequence(this) { if (it.type == FILE) null else it.parent }
 
 val Node.parents: Sequence<Node>
     get() = parentsWithSelf.drop(1)
 
+val Node.isNonLocalFunction: Boolean
+    get() = type == FUNCTION && parent!!.type == CLASS
 
+val Node.isTopLevelFunction: Boolean
+    get() = type == FUNCTION && (parent!!.type == FILE || parent.type == PACKAGE)
 
+val Node.isTopLevelClass: Boolean
+    get() = type == CLASS && (parent!!.type == FILE || parent.type == PACKAGE)
+
+val Node.topLevelParentOrSelf: Node?
+    get() = parentsWithSelf.firstOrNull { it.isTopLevelFunction || it.isTopLevelClass }
+
+val Node.descendants: List<Node>
+    get() {
+        val tour = ArrayList<Node>()
+        fun dfs(current: Node) {
+            for (child in current.children) {
+                tour.add(child)
+                dfs(child)
+            }
+        }
+
+        dfs(this)
+        return tour
+    }
+
+fun <T> MutableList<T>.swap(index1: Int, index2: Int) {
+    val tmp = this[index1]
+    this[index1] = this[index2]
+    this[index2] = tmp
+}
